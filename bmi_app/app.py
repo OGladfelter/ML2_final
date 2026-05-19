@@ -9,6 +9,7 @@ from PIL import Image
 import io
 import base64
 import os
+import onnxruntime as ort
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
@@ -19,15 +20,19 @@ MODEL_DIR = os.path.join(os.path.dirname(__file__), 'models')
 models = {
     'vgg16':        {'path': os.path.join(MODEL_DIR, 'vgg16_bmi.keras'),         'uses_gender': False},
     'vggface':      {'path': os.path.join(MODEL_DIR, 'vggface_bmi.keras'),       'uses_gender': False},
+    'bandar': {'path': os.path.join(MODEL_DIR, 'final_facial_bmi_model.onnx'), 'uses_gender': False},
 }
 
 loaded_models = {}
 for name, cfg in models.items():
-    if os.path.exists(cfg['path']):
-        loaded_models[name] = load_model(cfg['path'])
-        print(f"Loaded {name}")
+    if not os.path.exists(cfg['path']):
+        print(f"WARNING: {name} not found")
+        continue
+    if cfg['path'].endswith('.onnx'):
+        loaded_models[name] = ort.InferenceSession(cfg['path'])
     else:
-        print(f"WARNING: {name} not found at {cfg['path']}")
+        loaded_models[name] = load_model(cfg['path'])
+    print(f"Loaded {name}")
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 def preprocess_image(image_bytes, model_id):
@@ -38,6 +43,12 @@ def preprocess_image(image_bytes, model_id):
         x[..., 0] -= 129.1863
         x[..., 1] -= 104.7624
         x[..., 2] -= 93.5940
+    elif model_id == 'bandar':
+        x = x / 255.0
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+        x = (x - mean) / std
+        x = np.transpose(x, (2, 0, 1))  # HWC -> CHW
     else:
         x = preprocess_input(x)
     return np.expand_dims(x, axis=0)
@@ -57,7 +68,6 @@ def list_models():
         'models': [
             {'id': 'vgg16',      'label': 'VGG16 (ImageNet)',          'uses_gender': False},
             {'id': 'vggface',    'label': 'VGG-Face',                  'uses_gender': False},
-            {'id': 'vggface_v2', 'label': 'VGG-Face + Gender (best)',  'uses_gender': True},
         ],
         'available': list(loaded_models.keys())
     })
@@ -85,7 +95,10 @@ def predict():
     if uses_gender:
         gender_val = np.array([[1 if gender == 'Male' else 0]])
         bmi = float(model.predict([x, gender_val], verbose=0)[0][0])
-    else:
+    elif hasattr(model, 'get_inputs'):  # ONNX
+        input_name = model.get_inputs()[0].name
+        bmi = float(model.run(None, {input_name: x.astype('float32')})[1].flatten()[0])
+    else:  # Keras
         bmi = float(model.predict(x, verbose=0)[0][0])
 
     low, high = bmi_confidence_range(bmi)

@@ -366,6 +366,10 @@
       VGG-Face (no gender)
       <div class="model-r">r = 0.52</div>
     </button>
+    <button class="model-btn" data-model="bandar">
+      ResNet-50<br>Multi-Task
+      <div class="model-r">r = 0.69</div>
+    </button>
   </div>
 
   <div style="margin-top:20px">
@@ -454,7 +458,7 @@
   const BMI_MIN = 15, BMI_MAX = 42;
 
   // ── state ──────────────────────────────────────────────────────────────────
-  let selectedModel  = 'vggface_v2';
+  let selectedModel  = 'vgg16';
   let selectedGender = 'Male';
   let activeTab      = 'upload';
   let capturedImage  = null;   // base64 data URL
@@ -589,8 +593,12 @@
     document.getElementById('result-card').style.display = 'block';
     document.getElementById('bmi-val').textContent = bmi.toFixed(1);
     document.getElementById('range-label').textContent = `${range_low} – ${range_high}`;
-    document.getElementById('meta-model').textContent  = model;
-    document.getElementById('meta-gender').textContent = gender;
+    const modelLabels = {
+        'vgg16': 'VGG16 (ImageNet)',
+        'vggface': 'VGG-Face',
+        'bandar': 'ResNet-50 Multi-Task'
+    };
+    document.getElementById('meta-model').textContent = modelLabels[model] || model;    document.getElementById('meta-gender').textContent = gender;
 
     // position bar
     const pct    = v => Math.max(0, Math.min(100, (v - BMI_MIN) / (BMI_MAX - BMI_MIN) * 100));

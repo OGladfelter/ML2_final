@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Face → BMI</title>
+<style>
+  :root {
+    --bg:       #0a0a0a;
+    --surface:  #131313;
+    --border:   #222222;
+    --accent:   #c8f55a;
+    --accent2:  #5af5c8;
+    --text:     #f0f0f0;
+    --muted:    #c0c0c0;
+    --danger:   #f55a5a;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Arial', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 24px;
+    overflow-x: hidden;
+  }
+
+  /* noise overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 56px;
+    position: relative;
+    z-index: 1;
+  }
+
+  header h1 {
+    font-family: 'Arial', sans-serif;
+    font-size: clamp(2.5rem, 6vw, 4.5rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  header h1 span { color: var(--accent); }
+
+  header p {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 0.8rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 32px;
+    width: 100%;
+    max-width: 560px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .card + .card { margin-top: 16px; }
+
+  .label {
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* model selector */
+  .model-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+
+  .model-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'Arial', monospace;
+    font-size: 0.7rem;
+    padding: 10px 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s;
+    line-height: 1.4;
+  }
+
+  .model-btn:hover { border-color: var(--accent); color: var(--text); }
+  .model-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(200,245,90,0.05); }
+  .model-btn .model-r { font-size: 0.6rem; color: var(--muted); margin-top: 4px; }
+  .model-btn.active .model-r { color: var(--accent); opacity: 0.7; }
+
+  /* gender toggle */
+  .gender-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .gender-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'Arial', monospace;
+    font-size: 0.75rem;
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .gender-btn:hover { border-color: var(--accent2); color: var(--text); }
+  .gender-btn.active { border-color: var(--accent2); color: var(--accent2); background: rgba(90,245,200,0.05); }
+  .gender-note { font-size: 0.65rem; color: var(--muted); margin-top: 8px; }
+  #gender-row-wrapper.hidden { opacity: 0.3; pointer-events: none; }
+
+  /* image input */
+  .input-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: 'Arial', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 8px 20px 10px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all 0.15s;
+  }
+
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* webcam */
+  #webcam-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: #000;
+    overflow: hidden;
+  }
+
+  #webcam, #canvas {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  #canvas { display: none; }
+
+  .webcam-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .face-frame {
+    width: 180px;
+    height: 220px;
+    border: 2px solid rgba(200,245,90,0.4);
+    border-radius: 50%;
+  }
+
+  /* upload */
+  #drop-zone {
+    border: 1px dashed var(--border);
+    padding: 40px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    position: relative;
+  }
+
+  #drop-zone:hover, #drop-zone.drag-over { border-color: var(--accent); }
+  #drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  #drop-zone p { color: var(--muted); font-size: 0.75rem; line-height: 1.8; }
+  #drop-zone span { color: var(--accent); }
+
+  #preview-img {
+    width: 100%;
+    max-height: 300px;
+    object-fit: contain;
+    display: none;
+    margin-top: 12px;
+  }
+
+  /* action button */
+  .predict-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #0a0a0a;
+    border: none;
+    font-family: 'Arial', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 16px;
+    cursor: pointer;
+    margin-top: 16px;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+
+  .predict-btn:hover { background: #d4f970; transform: translateY(-1px); }
+  .predict-btn:active { transform: translateY(0); }
+  .predict-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; transform: none; }
+
+  /* results */
+  #result-card { display: none; }
+
+  .bmi-display {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .bmi-number {
+    font-family: 'Arial', sans-serif;
+    font-size: 5rem;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--accent);
+    letter-spacing: -0.04em;
+  }
+
+  .bmi-unit { color: var(--muted); font-size: 0.8rem; }
+
+  .confidence-bar-wrap { margin-bottom: 20px; }
+
+  .confidence-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .bar-track {
+    height: 4px;
+    background: var(--border);
+    position: relative;
+    border-radius: 2px;
+  }
+
+  .bar-range {
+    position: absolute;
+    height: 100%;
+    background: var(--accent2);
+    border-radius: 2px;
+    transition: all 0.4s ease;
+  }
+
+  .bar-point {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    transition: left 0.4s ease;
+  }
+
+  .bmi-scale-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.6rem;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+
+  .meta-row {
+    display: flex;
+    gap: 16px;
+    font-size: 0.7rem;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+
+  .meta-row span { color: var(--text); }
+
+  .error-msg {
+    color: var(--danger);
+    font-size: 0.75rem;
+    margin-top: 8px;
+    display: none;
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid #0a0a0a;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  footer {
+    margin-top: 48px;
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-align: center;
+    letter-spacing: 0.1em;
+    position: relative;
+    z-index: 1;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>BMI Prediction</h1>
+</header>
+
+<!-- Model selector -->
+<div class="card">
+  <div class="label">Select model</div>
+  <div class="model-grid">
+    <button class="model-btn" data-model="vgg16">
+      VGG16<br>ImageNet
+      <div class="model-r">r = 0.48</div>
+    </button>
+    <button class="model-btn" data-model="vggface">
+      VGG-Face (no gender)
+      <div class="model-r">r = 0.52</div>
+    </button>
+  </div>
+
+  <div style="margin-top:20px">
+    <div class="label">Gender <span style="font-size:0.6rem">(only used by VGG-Face + Gender)</span></div>
+    <div id="gender-row-wrapper">
+      <div class="gender-row">
+        <button class="gender-btn active" data-gender="Male">Male</button>
+        <button class="gender-btn" data-gender="Female">Female</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Image input -->
+<div class="card">
+  <div class="label">Input image</div>
+  <div class="input-tabs">
+    <button class="tab-btn active" data-tab="upload">Upload</button>
+    <button class="tab-btn" data-tab="webcam">Webcam</button>
+  </div>
+
+  <!-- Upload panel -->
+  <div class="tab-panel active" id="tab-upload">
+    <div id="drop-zone">
+      <input type="file" id="file-input" accept="image/*">
+      <p>Drop a photo here<br><span>or click to browse</span><br><br>Any headshot works.</p>
+    </div>
+    <img id="preview-img" alt="preview">
+  </div>
+
+  <!-- Webcam panel -->
+  <div class="tab-panel" id="tab-webcam">
+    <div id="webcam-wrap">
+      <video id="webcam" autoplay playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="webcam-overlay">
+        <div class="face-frame"></div>
+      </div>
+    </div>
+  </div>
+
+  <button class="predict-btn" id="predict-btn">Predict BMI</button>
+  <div class="error-msg" id="error-msg"></div>
+</div>
+
+<!-- Results -->
+<div class="card" id="result-card">
+  <div class="label">Result</div>
+  <div class="bmi-display">
+    <div class="bmi-number" id="bmi-val">—</div>
+    <div class="bmi-unit">BMI<br>kg/m²</div>
+  </div>
+
+  <div class="confidence-bar-wrap">
+    <div class="confidence-label">
+      <span>Confidence Range</span>
+      <span id="range-label">— to —</span>
+    </div>
+    <div class="bar-track">
+      <div class="bar-range" id="bar-range"></div>
+      <div class="bar-point" id="bar-point"></div>
+    </div>
+    <div class="bmi-scale-labels">
+      <span>15</span>
+      <span>20</span>
+      <span>25</span>
+      <span>30</span>
+      <span>35</span>
+      <span>40+</span>
+    </div>
+  </div>
+
+  <div class="meta-row">
+    <div>Model <span id="meta-model">—</span></div>
+    <div>Gender <span id="meta-gender">—</span></div>
+    <div>Range <span id="meta-range">±3.5</span></div>
+  </div>
+</div>
+
+<footer>
+  Kocabey et al. (2017) · Face-to-BMI · ICWSM · Replicated & Extended
+</footer>
+
+<script>
+  const API = 'http://localhost:5000';
+  const BMI_MIN = 15, BMI_MAX = 42;
+
+  // ── state ──────────────────────────────────────────────────────────────────
+  let selectedModel  = 'vggface_v2';
+  let selectedGender = 'Male';
+  let activeTab      = 'upload';
+  let capturedImage  = null;   // base64 data URL
+  let stream         = null;
+
+  // ── model buttons ──────────────────────────────────────────────────────────
+  document.querySelectorAll('.model-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedModel = btn.dataset.model;
+      // grey out gender if not vggface_v2
+      document.getElementById('gender-row-wrapper').classList.toggle('hidden', selectedModel !== 'vggface_v2');
+    });
+  });
+
+  // ── gender buttons ─────────────────────────────────────────────────────────
+  document.querySelectorAll('.gender-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.gender-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedGender = btn.dataset.gender;
+    });
+  });
+
+  // ── tabs ───────────────────────────────────────────────────────────────────
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      activeTab = btn.dataset.tab;
+      document.getElementById(`tab-${activeTab}`).classList.add('active');
+      if (activeTab === 'webcam') startWebcam();
+      else stopWebcam();
+    });
+  });
+
+  // ── file upload ────────────────────────────────────────────────────────────
+  const fileInput  = document.getElementById('file-input');
+  const previewImg = document.getElementById('preview-img');
+  const dropZone   = document.getElementById('drop-zone');
+
+  fileInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      capturedImage = ev.target.result;
+      previewImg.src = capturedImage;
+      previewImg.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      capturedImage = ev.target.result;
+      previewImg.src = capturedImage;
+      previewImg.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // ── webcam ─────────────────────────────────────────────────────────────────
+  const webcamEl = document.getElementById('webcam');
+  const canvas   = document.getElementById('canvas');
+
+  async function startWebcam() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      webcamEl.srcObject = stream;
+    } catch { showError('Camera access denied.'); }
+  }
+
+  function stopWebcam() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  }
+
+  function captureFrame() {
+    canvas.width  = webcamEl.videoWidth;
+    canvas.height = webcamEl.videoHeight;
+    canvas.getContext('2d').drawImage(webcamEl, 0, 0);
+    return canvas.toDataURL('image/jpeg', 0.9);
+  }
+
+  // ── predict ────────────────────────────────────────────────────────────────
+  const predictBtn = document.getElementById('predict-btn');
+
+  predictBtn.addEventListener('click', async () => {
+    hideError();
+
+    let imageData;
+    if (activeTab === 'webcam') {
+      if (!stream) { showError('Start webcam first.'); return; }
+      imageData = captureFrame();
+    } else {
+      if (!capturedImage) { showError('Please upload an image.'); return; }
+      imageData = capturedImage;
+    }
+
+    predictBtn.disabled = true;
+    predictBtn.innerHTML = '<span class="spinner"></span>Predicting...';
+
+    try {
+      const res = await fetch(`${API}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData, model: selectedModel, gender: selectedGender })
+      });
+
+      if (!res.ok) throw new Error((await res.json()).error || 'Server error');
+      const data = await res.json();
+      showResult(data);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      predictBtn.disabled = false;
+      predictBtn.innerHTML = 'Predict BMI';
+    }
+  });
+
+  // ── result display ─────────────────────────────────────────────────────────
+  function showResult({ bmi, range_low, range_high, model, gender }) {
+    document.getElementById('result-card').style.display = 'block';
+    document.getElementById('bmi-val').textContent = bmi.toFixed(1);
+    document.getElementById('range-label').textContent = `${range_low} – ${range_high}`;
+    document.getElementById('meta-model').textContent  = model;
+    document.getElementById('meta-gender').textContent = gender;
+
+    // position bar
+    const pct    = v => Math.max(0, Math.min(100, (v - BMI_MIN) / (BMI_MAX - BMI_MIN) * 100));
+    const lowPct  = pct(range_low);
+    const highPct = pct(range_high);
+    const midPct  = pct(bmi);
+
+    document.getElementById('bar-range').style.left  = `${lowPct}%`;
+    document.getElementById('bar-range').style.width = `${highPct - lowPct}%`;
+    document.getElementById('bar-point').style.left  = `${midPct}%`;
+
+    document.getElementById('result-card').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function hideError() {
+    document.getElementById('error-msg').style.display = 'none';
+  }
+</script>
+</body>
+</html>
